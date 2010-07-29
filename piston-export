@@ -1,0 +1,106 @@
+#!/usr/bin/env php
+<?php
+
+if(!isset($_SERVER['argv'][2])) {
+    echo "Usage: {$_SERVER['argv'][0]} (piston dir) (dest repository) (dest branch)
+    
+For example:
+
+cd ~/Sites/yourproject
+piston-export sapphire ~/Sites/gitdev/sapphire newchanges
+
+If you have checked an external into your git project using piston, and then made changes to it, you
+need a way of getting those changes back.
+
+This script will export all of those changes to a new git branch of a working copy.  Where possible,
+it leaves the hard work to git.\n";
+    exit(1);
+}
+
+$pistonDir = $_SERVER['argv'][1];
+$pistonDirFull = realpath($pistonDir);
+$destRepos = realpath($_SERVER['argv'][2]);
+$destBranch = isset($_SERVER['argv'][3]) ? $_SERVER['argv'][3] : 'master';
+
+if(!file_exists("$pistonDir/.piston.yml")) {
+    echo "$pistonDir not a piston external ($pistonDir/.piston.yml not found)\n";
+    exit(2);
+}
+
+if(!file_exists("$destRepos/.git")) {
+    echo "$destRepos not a piston external ($destRepos/.git not found)\n";
+    exit(3);
+}
+
+if(file_exists("$destRepos/.git/rebase-apply")) {
+	echo "You should call 'git --git-dir=$destRepos/.git am --abort' on your dest repository first\n";
+	exit(4);
+}
+
+require_once('Spyc.php');
+$parser = new Spyc;
+$config = $parser->load("$pistonDirFull/.piston.yml");
+
+if(isset($config['exported_to'])) {
+	$logFilter = $config['exported_to'] . "..HEAD";
+} else {
+	$logFilter = "";
+}
+
+$allHashes = explode("\n", trim(`git log --pretty="%H" $logFilter $pistonDir`));
+$hashesToIgnore = explode("\n", trim(`git log --pretty="%H" $logFilter $pistonDir/.piston.yml`));
+
+if($allHashes == array("")) $allHashes = array();
+if($hashesToIgnore == array("")) $hashesToIgnore = array();
+
+if(!$allHashes) {
+	if($config['exported_to']) {
+		echo "There weren't any more patches to apply since {$config['exported_to']}\n";
+	} else {
+		echo "There weren't any patches to apply\n";
+	}
+	exit(0);
+}
+	
+$patchDirBase = "$destRepos/piston-export-" . date('Ymd');
+$patchDir = $patchDirBase;
+$suffix = 1;
+while(file_exists($patchDir)) {
+	$suffix++;
+	$patchDir = "$patchDirBase-$suffix";
+}
+mkdir($patchDir);
+
+$hashesToInclude = array_diff($allHashes, $hashesToIgnore);
+$hashesToInclude = array_reverse($hashesToInclude);
+
+
+foreach($hashesToInclude as $i => $hash) {
+	$patchFile = str_pad($i, 5, 0, STR_PAD_LEFT) . '.patch';
+	echo "Creating patch for $hash -> $patchDir/$patchFile\n";
+	`git format-patch --stdout $hash~..$hash > $patchDir/$patchFile`;
+}
+
+// Update config without the full destructive powers of Spyc
+$yaml = file_get_contents("$pistonDirFull/.piston.yml");
+$newExportedTo = trim(`git rev-parse HEAD`);
+$replacedSuccessfully = false;
+$yaml = preg_replace('/exported_to: ([a-zA-Z0-9]+)/', "exported_to: $newExportedTo", $yaml, -1, $replacedSuccessfully);
+if(!$replacedSuccessfully) {
+	$yaml .= "\nexported_to: $newExportedTo";
+}
+file_put_contents("$pistonDirFull/.piston.yml", $yaml);
+
+// Apply the patches
+chdir($destRepos);
+if(!trim(`git branch | grep $destBranch`)) {
+	echo "Creating dest branch '$destBranch'...\n";
+	`git checkout -b $destBranch`;
+} else {
+	echo "Checking out dest branch '$destBranch'...\n";
+	`git checkout $destBranch`;
+}
+
+// To do: -p 2 only works for piston imports in the root
+echo "Applying patches (git am --ignore-whitespace --whitespace=nowarn -p 2 $patchDir/*)...\n";
+passthru("git am --ignore-whitespace --whitespace=nowarn -p 2 $patchDir/*");
