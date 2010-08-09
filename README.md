@@ -28,6 +28,13 @@ You've made some changes in the sapphire directory, run `piston update` a few ti
 
         cd ~/Projects/gitsvn
         git svn clone http://svn.silverstripe.com/open/modules/branches/sapphire/2.4 sapphire
+        
+ * If you had created this repository previously, you might want to make sure it's nice & clean
+ 
+        cd ~/Projects/gitsvn/sapphire
+        git checkout -f master
+        git clean -fd
+        git am --abort
 
  * Go to your project and run piston export, passing the piston imported directory and the newly created git clone of the original source, and optionally a branchname.
  
@@ -40,6 +47,13 @@ You've made some changes in the sapphire directory, run `piston update` a few ti
         git checkout stuff-from-myproject
         git rebase --interactive master
 
+
+ * Here are some of the things that you can tidy up with interactive rebasing:
+   * Alter the commit messages to remove any references to your project and make them appropriate for the main repository.
+   * Reorder the commits so that the ones that can be merged straight away come first, and the ones that still need review come second.  This will keep the commit history more linear if you are only going to `git svn dcommit` a portion of the commits to begin with.
+   * Remove any commits that are inappropriate, for example a change that is subsequently reverted, or a project-specific change that should never make its way into the main repository.
+   * Squash multiple commits for a single feature together into a single commit.  This will keep the main repository's history more concise.
+
  * Alternatively, you could cherry-pick some of the changes into a separate branch, letting you commit some now and leave some for later.  I'm personally a fan of using GitX for this purpose.
  
  * Once you're ready to commit them back, you can submit them to the core project in whatever way suits you best.
@@ -49,6 +63,21 @@ You've made some changes in the sapphire directory, run `piston update` a few ti
    * You could push them to a GitHub fork of the project and file a pull request.
 
 **Note:** `piston-export` will add an `exported_to` entry to .piston.yml, which means that piston-export can be called multiple times.
+
+### What if there were conflicts?
+
+If any of the patches weren't able to be applied, you will need to continue the `git am` execution yourself.  `git am` is the tool that is used to apply the patches.  First, go to the directory where you were applying files.
+
+    cd ~/Projects/gitsvn/sapphire
+    
+The pieces of the patch that could be applied will be included in the unstaged changes.  The other pieces will be included in .rej files.  Review the .rej files and manually apply them.  Then git add the files that should be part of this patch:
+
+    git add <altered-files>
+    git am --resolved
+    
+Alternatively, you may decide that this patch shouldn't be applied:
+
+    git am --skip
 
 How does it work?
 -----------------
