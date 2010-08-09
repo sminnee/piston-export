@@ -78,7 +78,7 @@ $hashesToInclude = array_reverse($hashesToInclude);
 foreach($hashesToInclude as $i => $hash) {
 	$patchFile = str_pad($i, 5, 0, STR_PAD_LEFT) . '.patch';
 	echo "Creating patch for $hash -> $patchDir/$patchFile\n";
-	`git format-patch --stdout $hash~..$hash > $patchDir/$patchFile`;
+	`git format-patch --relative=$pistonDir --stdout $hash~..$hash > $patchDir/$patchFile`;
 }
 
 // Update config without the full destructive powers of Spyc
@@ -101,6 +101,5 @@ if(!trim(`git branch | grep $destBranch`)) {
 	`git checkout $destBranch`;
 }
 
-// To do: -p 2 only works for piston imports in the root
-echo "Applying patches (git am --ignore-whitespace --whitespace=nowarn -p 2 $patchDir/*)...\n";
-passthru("git am --ignore-whitespace --whitespace=nowarn -p 2 $patchDir/*");
+echo "Applying patches (git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*)...\n";
+passthru("git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*");
