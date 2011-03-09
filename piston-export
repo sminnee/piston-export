@@ -54,7 +54,7 @@ if($allHashes == array("")) $allHashes = array();
 if($hashesToIgnore == array("")) $hashesToIgnore = array();
 
 if(!$allHashes) {
-	if($config['exported_to']) {
+	if(isset($config['exported_to'])) {
 		echo "There weren't any more patches to apply since {$config['exported_to']}\n";
 	} else {
 		echo "There weren't any patches to apply\n";
