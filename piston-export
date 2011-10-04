@@ -12,8 +12,9 @@ piston-export sapphire ~/Sites/gitdev/sapphire newchanges
 If you have checked an external into your git project using piston, and then made changes to it, you
 need a way of getting those changes back.
 
-This script will export all of those changes to a new git branch of a working copy.  Where possible,
-it leaves the hard work to git.\n";
+This script will export all of those changes to a new git branch of a working copy or if the option
+`--patches-only` is passed, then a list of patch files will be produced.  Where possible, it leaves 
+the hard work to git.\n";
     exit(1);
 }
 
@@ -22,12 +23,31 @@ $pistonDirFull = realpath($pistonDir);
 $destRepos = realpath($_SERVER['argv'][2]);
 $destBranch = isset($_SERVER['argv'][3]) ? $_SERVER['argv'][3] : 'master';
 
+$args = array(
+	'patches-only' => false
+);
+
+// check flags
+foreach($_SERVER['argv'] as $arg) {
+	if(substr($arg, 0, 2) == "--") {
+		$key = substr($arg, 2);
+		$value = (strpos($arg, "=") !== false) ? substr($arg, strpos($arg, "=")) : true;
+		
+		if(isset($args[$key])) $args[$key] = $value;
+		else {
+			echo "unknow flag $arg";
+			exit(1);
+		}
+	}
+}
+
+
 if(!file_exists("$pistonDir/.piston.yml")) {
     echo "$pistonDir not a piston external ($pistonDir/.piston.yml not found)\n";
     exit(2);
 }
 
-if(!file_exists("$destRepos/.git")) {
+if(!file_exists("$destRepos/.git") && !$args['patches-only']) {
     echo "$destRepos not a piston external ($destRepos/.git not found)\n";
     exit(3);
 }
@@ -38,6 +58,9 @@ if(file_exists("$destRepos/.git/rebase-apply")) {
 }
 
 require_once('Spyc.php');
+
+
+
 $parser = new Spyc;
 $config = $parser->load("$pistonDirFull/.piston.yml");
 
@@ -82,25 +105,30 @@ foreach($hashesToInclude as $i => $hash) {
 	`git format-patch --relative=$relativePistonDir --stdout $hash~..$hash > $patchDir/$patchFile`;
 }
 
-// Update config without the full destructive powers of Spyc
-$yaml = file_get_contents("$pistonDirFull/.piston.yml");
-$newExportedTo = trim(`git rev-parse HEAD`);
-$replacedSuccessfully = false;
-$yaml = preg_replace('/exported_to: ([a-zA-Z0-9]+)/', "exported_to: $newExportedTo", $yaml, -1, $replacedSuccessfully);
-if(!$replacedSuccessfully) {
-	$yaml .= "\nexported_to: $newExportedTo";
-}
-file_put_contents("$pistonDirFull/.piston.yml", $yaml);
+if(!$args['patches-only']) {
+	// Update config without the full destructive powers of Spyc
+	$yaml = file_get_contents("$pistonDirFull/.piston.yml");
+	$newExportedTo = trim(`git rev-parse HEAD`);
+	$replacedSuccessfully = false;
+	$yaml = preg_replace('/exported_to: ([a-zA-Z0-9]+)/', "exported_to: $newExportedTo", $yaml, -1, $replacedSuccessfully);
+	
+	if(!$replacedSuccessfully) {
+		$yaml .= "\nexported_to: $newExportedTo";
+	}
+	
+	file_put_contents("$pistonDirFull/.piston.yml", $yaml);
 
-// Apply the patches
-chdir($destRepos);
-if(!trim(`git branch | grep $destBranch`)) {
-	echo "Creating dest branch '$destBranch'...\n";
-	`git checkout -b $destBranch`;
-} else {
-	echo "Checking out dest branch '$destBranch'...\n";
-	`git checkout $destBranch`;
-}
+	// Apply the patches
+	chdir($destRepos);
+	
+	if(!trim(`git branch | grep $destBranch`)) {
+		echo "Creating dest branch '$destBranch'...\n";
+		`git checkout -b $destBranch`;
+	} else {
+		echo "Checking out dest branch '$destBranch'...\n";
+		`git checkout $destBranch`;
+	}
 
-echo "Applying patches (git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*)...\n";
-passthru("git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*");
+	echo "Applying patches (git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*)...\n";
+	passthru("git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*");
+}
