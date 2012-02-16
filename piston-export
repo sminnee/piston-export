@@ -6,15 +6,21 @@ if(!isset($_SERVER['argv'][2])) {
     
 For example:
 
-cd ~/Sites/yourproject
-piston-export sapphire ~/Sites/gitdev/sapphire newchanges
+	cd ~/Sites/yourproject
+	piston-export sapphire ~/Sites/gitdev/sapphire newchanges
 
-If you have checked an external into your git project using piston, and then made changes to it, you
-need a way of getting those changes back.
+If you have checked an external into your git project using piston, and then 
+made changes to it, you need a way of getting those changes back.
 
-This script will export all of those changes to a new git branch of a working copy or if the option
-`--patches-only` is passed, then a list of patch files will be produced.  Where possible, it leaves 
-the hard work to git.\n";
+This script will export all of those changes to a new git branch of a working 
+copy or if the option `--patches-only` is passed, then a list of patch files 
+will be produced.  Where possible, it leaves the hard work to git.\n
+\n
+Options:
+	--patches-only	Generates the patch files to export then quits. 
+			This does not commit changes to dest repo.
+	--skip=[%H]		Skips a comma seperated list of hashes.
+			Hash must be full hash.\n";
     exit(1);
 }
 
@@ -24,14 +30,16 @@ $destRepos = realpath($_SERVER['argv'][2]);
 $destBranch = isset($_SERVER['argv'][3]) ? $_SERVER['argv'][3] : 'master';
 
 $args = array(
-	'patches-only' => false
+	'patches-only' => false,
+	'skip' => ''
 );
 
 // check flags
 foreach($_SERVER['argv'] as $arg) {
 	if(substr($arg, 0, 2) == "--") {
-		$key = substr($arg, 2);
-		$value = (strpos($arg, "=") !== false) ? substr($arg, strpos($arg, "=")) : true;
+		$endArg = strpos($arg, "=");
+		$key = substr($arg, 2, $endArg-2);
+		$value = (strpos($arg, "=") !== false) ? substr($arg, strpos($arg, "=") + 1) : true;
 		
 		if(isset($args[$key])) $args[$key] = $value;
 		else {
@@ -40,8 +48,7 @@ foreach($_SERVER['argv'] as $arg) {
 		}
 	}
 }
-
-
+ 
 if(!file_exists("$pistonDir/.piston.yml")) {
     echo "$pistonDir not a piston external ($pistonDir/.piston.yml not found)\n";
     exit(2);
@@ -56,6 +63,13 @@ if(file_exists("$destRepos/.git/rebase-apply")) {
 	echo "You should call 'git --git-dir=$destRepos/.git am --abort' on your dest repository first\n";
 	exit(4);
 }
+
+
+// Handle post processing on args
+if($args['skip']) 
+	$args['skip'] = explode(',', $args['skip']);
+else
+	$args['skip'] = array();
 
 require_once('Spyc.php');
 
@@ -76,7 +90,12 @@ $hashesToIgnore = explode("\n", trim(`git log --pretty="%H" $logFilter $pistonDi
 if($allHashes == array("")) $allHashes = array();
 if($hashesToIgnore == array("")) $hashesToIgnore = array();
 
-if(!$allHashes) {
+$hashesToIgnore = array_merge($hashesToIgnore, $args['skip']);
+
+$hashesToInclude = array_diff($allHashes, $hashesToIgnore);
+$hashesToInclude = array_reverse($hashesToInclude);
+
+if(count($hashesToInclude) < 1) {
 	if(isset($config['exported_to'])) {
 		echo "There weren't any more patches to apply since {$config['exported_to']}\n";
 	} else {
@@ -88,14 +107,13 @@ if(!$allHashes) {
 $patchDirBase = "$destRepos/piston-export-" . date('Ymd');
 $patchDir = $patchDirBase;
 $suffix = 1;
+
 while(file_exists($patchDir)) {
 	$suffix++;
 	$patchDir = "$patchDirBase-$suffix";
 }
-mkdir($patchDir);
 
-$hashesToInclude = array_diff($allHashes, $hashesToIgnore);
-$hashesToInclude = array_reverse($hashesToInclude);
+mkdir($patchDir);
 
 
 foreach($hashesToInclude as $i => $hash) {
@@ -109,8 +127,7 @@ if(!$args['patches-only']) {
 	$yaml = file_get_contents("$pistonDirFull/.piston.yml");
 	$newExportedTo = trim(`git rev-parse HEAD`);
 	$replacedSuccessfully = false;
-	$yaml = preg_replace('/exported_to: ([a-zA-Z0-9]+)/', "exported_to: $newExportedTo", $yaml, -1, $replacedSuccessfully);
-	
+
 	if(!$replacedSuccessfully) {
 		$yaml .= "\nexported_to: $newExportedTo";
 	}
@@ -130,4 +147,6 @@ if(!$args['patches-only']) {
 
 	echo "Applying patches (git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*)...\n";
 	passthru("git am --reject --ignore-whitespace --whitespace=nowarn -p 1 $patchDir/*");
+	
+	$yaml = preg_replace('/exported_to: ([a-zA-Z0-9]+)/', "exported_to: $newExportedTo", $yaml, -1, $replacedSuccessfully);
 }
